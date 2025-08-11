@@ -24,17 +24,34 @@ State exp_init(
 {
   YAML::Node yaml = YAML::LoadFile(std::string(config_fn));
 
-  BasisClasses::BasisPtr basis;
+  auto load_basis = [](auto yaml, auto config_fn) -> auto
   {
-    // change the cwd to the directory of the config file
-    // so that relative paths in the config file work
-    ScopedChdir cd(fs::path(config_fn).parent_path());
-    basis = BasisClasses::Basis::factory(yaml);
-  }
 
+    BasisClasses::BasisPtr base_basis;
+    {
+      // change the cwd to the directory of the config file
+      // so that relative paths in the config file work
+      ScopedChdir cd(fs::path(config_fn).parent_path());
+
+      base_basis = BasisClasses::Basis::factory(yaml);
+    }
+
+    if (!base_basis) {
+      std::ostringstream error_msg;
+      error_msg << "Failed to load basis from config file: " << config_fn;
+      throw std::runtime_error(error_msg.str());
+    }
+    return base_basis;
+  };
+
+  auto basis(
+    std::dynamic_pointer_cast<BasisClasses::BiorthBasis>(
+      load_basis(yaml, config_fn)
+    )
+  );
   if (!basis) {
     std::ostringstream error_msg;
-    error_msg << "Failed to load basis from config file: " << config_fn;
+    error_msg << "Basis in config file " << config_fn << " must be a BiorthBasis.";
     throw std::runtime_error(error_msg.str());
   }
 
@@ -194,13 +211,11 @@ void exp_gradient(double t, double *pars, double *q, int n_dim, double *grad, vo
     exp_state->basis->set_coefs(gala_exp::interpolator(t, exp_state->coefs));
   }
 
-  // TODO: ask Martin/Mike for a way to compute only the force/acceleration - we're wasting
-  // computation time here by computing all fields
-  auto field = exp_state->basis->getFields(q[0], q[1], q[2]);
+  auto field = exp_state->basis->getAccel(q[0], q[1], q[2]);
 
-  grad[0] += -field[6];
-  grad[1] += -field[7];
-  grad[2] += -field[8];
+  grad[0] += field[0];
+  grad[1] += field[1];
+  grad[2] += field[2];
 }
 
 double exp_density(double t, double *pars, double *q, int n_dim, void* state) {
